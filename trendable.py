@@ -117,6 +117,31 @@ class Candidate:
     tag: str
     position: int
     score: float
+    summary: str = ""
+    image_url: str = ""
+
+
+class MetaParser(HTMLParser):
+    def __init__(self, base_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.summary = ""
+        self.image_url = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "meta":
+            return
+
+        attr = dict(attrs)
+        key = (attr.get("property") or attr.get("name") or "").lower()
+        content = clean_text(attr.get("content") or "")
+        if not content:
+            return
+
+        if key in {"og:description", "twitter:description", "description"} and not self.summary:
+            self.summary = trim_summary(content)
+        elif key in {"og:image", "twitter:image", "twitter:image:src"} and not self.image_url:
+            self.image_url = urllib.parse.urljoin(self.base_url, content)
 
 
 class HeadlineParser(HTMLParser):
@@ -182,6 +207,8 @@ class HeadlineParser(HTMLParser):
                     tag=tag,
                     position=self._position,
                     score=base_score(tag, self._position),
+                    summary="",
+                    image_url="",
                 )
             )
 
@@ -244,6 +271,8 @@ def fetch_source(url: str, timeout: float) -> tuple[str, list[Candidate], str | 
                     tag="title",
                     position=0,
                     score=16.0,
+                    summary="",
+                    image_url="",
                 )
             )
 
@@ -276,6 +305,8 @@ def fetch_json_candidates(source: str, endpoint_url: str, timeout: float) -> tup
         if not looks_like_headline(title):
             continue
         link = extract_link(item) or endpoint_url
+        summary = extract_summary(item)
+        image_url = extract_image_url(item, source)
         score = 24.0 + max(0.0, 12.0 - min(position, 30) * 0.25)
         if item.get("hot") is True:
             score += 6.0
@@ -289,6 +320,8 @@ def fetch_json_candidates(source: str, endpoint_url: str, timeout: float) -> tup
                 tag="json",
                 position=position,
                 score=score,
+                summary=summary,
+                image_url=image_url,
             )
         )
 
@@ -330,6 +363,72 @@ def extract_link(item: dict) -> str:
     return ""
 
 
+def extract_summary(item: dict) -> str:
+    for key in ("summary", "description", "excerpt", "content"):
+        value = trim_summary(clean_text(str(item.get(key) or "")))
+        if value and value != extract_title(item):
+            return value
+    return ""
+
+
+def extract_image_url(item: dict, base_url: str) -> str:
+    for key in ("image", "image_url", "imageUrl", "thumbnail", "thumbnail_url", "urlToImage"):
+        value = str(item.get(key) or "").strip()
+        if value:
+            return urllib.parse.urljoin(base_url, value)
+    return ""
+
+
+def trim_summary(value: str, limit: int = 220) -> str:
+    value = clean_text(value)
+    if len(value) <= limit:
+        return value
+
+    clipped = value[: limit + 1]
+    boundary = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"), clipped.rfind(" "))
+    if boundary < 80:
+        boundary = limit
+    return clipped[:boundary].rstrip(" .,!?:;") + "..."
+
+
+def fetch_article_meta(candidate: Candidate, timeout: float) -> Candidate:
+    if candidate.summary and candidate.image_url:
+        return candidate
+    if not candidate.url or candidate.url == candidate.source:
+        return candidate
+
+    request = urllib.request.Request(candidate.url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            content_type = response.headers.get("content-type", "")
+            if "html" not in content_type.lower():
+                return candidate
+            charset = response.headers.get_content_charset() or "utf-8"
+            body = response.read(300_000).decode(charset, errors="replace")
+    except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError, OSError):
+        return candidate
+
+    parser = MetaParser(candidate.url)
+    parser.feed(body)
+    return Candidate(
+        text=candidate.text,
+        source=candidate.source,
+        url=candidate.url,
+        tag=candidate.tag,
+        position=candidate.position,
+        score=candidate.score,
+        summary=candidate.summary or parser.summary,
+        image_url=candidate.image_url or parser.image_url,
+    )
+
+
+def enrich_headlines(candidates: list[Candidate], timeout: float) -> list[Candidate]:
+    enrich_timeout = max(1.5, min(4.0, timeout / 2))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(candidates)))) as executor:
+        futures = [executor.submit(fetch_article_meta, candidate, enrich_timeout) for candidate in candidates]
+        return [future.result() for future in futures]
+
+
 def norm_key(text: str) -> str:
     text = re.sub(r"[^a-z0-9 ]+", "", text.lower())
     words = [word for word in text.split() if word not in STOPWORDS]
@@ -369,6 +468,8 @@ def rank(candidates: list[Candidate], limit: int) -> list[Candidate]:
             tag=candidate.tag,
             position=candidate.position,
             score=score,
+            summary=candidate.summary,
+            image_url=candidate.image_url,
         )
 
         existing = best_by_key.get(key)
@@ -389,7 +490,7 @@ def trendable(limit: int, timeout: float) -> tuple[list[Candidate], list[tuple[s
                 errors.append((source, error))
             all_candidates.extend(candidates)
 
-    return rank(all_candidates, limit), errors
+    return enrich_headlines(rank(all_candidates, limit), timeout), errors
 
 
 def main() -> int:
@@ -411,6 +512,10 @@ def main() -> int:
         host = urllib.parse.urlparse(item.source).netloc
         print(f"{index:>2}. {item.text}")
         print(f"    Source: {host}")
+        if item.summary:
+            print(f"    Summary: {item.summary}")
+        if item.image_url:
+            print(f"    Image: {item.image_url}")
         if item.url and item.url != item.source:
             print(f"    Link: {item.url}")
 
