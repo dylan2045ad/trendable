@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Trendable</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #15181d;
+        --muted: #626975;
+        --line: #d8dde5;
+        --paper: #f6f7f9;
+        --panel: #ffffff;
+        --accent: #0b6bcb;
+        --accent-strong: #064b91;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      header {
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .wrap {
+        width: min(1040px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 20px 0;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.1;
+      }
+
+      .status {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      button {
+        appearance: none;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        min-height: 40px;
+        padding: 0 14px;
+      }
+
+      button:hover {
+        background: var(--accent-strong);
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.72;
+      }
+
+      main {
+        padding: 24px 0 48px;
+      }
+
+      .headlines {
+        display: grid;
+        gap: 10px;
+      }
+
+      .headline {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        gap: 14px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .rank {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: #e9f2fc;
+        color: var(--accent-strong);
+        font-weight: 800;
+      }
+
+      .headline a {
+        color: var(--ink);
+        font-size: 17px;
+        font-weight: 700;
+        line-height: 1.35;
+        text-decoration: none;
+      }
+
+      .headline a:hover {
+        color: var(--accent);
+        text-decoration: underline;
+      }
+
+      .meta {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .empty,
+      .warning {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--muted);
+      }
+
+      .warning {
+        margin-top: 14px;
+        border-color: #e1b75d;
+        background: #fff8e6;
+        color: #6f5412;
+      }
+
+      @media (max-width: 640px) {
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        button {
+          width: 100%;
+        }
+
+        .headline {
+          grid-template-columns: 34px 1fr;
+          padding: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="wrap topbar">
+        <div>
+          <h1>Trendable</h1>
+          <div id="status" class="status">Loading top 15 headlines...</div>
+        </div>
+        <button id="refresh" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section id="headlines" class="headlines" aria-live="polite"></section>
+      <div id="warnings"></div>
+    </main>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const headlinesEl = document.getElementById("headlines");
+      const warningsEl = document.getElementById("warnings");
+      const refreshButton = document.getElementById("refresh");
+
+      function host(url) {
+        try {
+          return new URL(url).hostname;
+        } catch {
+          return url;
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;"
+        }[char]));
+      }
+
+      function render(data) {
+        statusEl.textContent = `${data.count} headlines from ${data.sourceCount} sources in ${data.durationSeconds}s`;
+        headlinesEl.innerHTML = data.headlines.map((item, index) => `
+          <article class="headline">
+            <div class="rank">${index + 1}</div>
+            <div>
+              <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.text)}</a>
+              <div class="meta">${escapeHtml(host(item.source))}</div>
+            </div>
+          </article>
+        `).join("") || '<div class="empty">No headlines found.</div>';
+
+        warningsEl.innerHTML = data.errors?.length
+          ? `<div class="warning">${data.errors.length} source warning${data.errors.length === 1 ? "" : "s"} while refreshing.</div>`
+          : "";
+      }
+
+      async function loadTrendable() {
+        refreshButton.disabled = true;
+        statusEl.textContent = "Scraping sources...";
+        try {
+          const response = await fetch("/api/trendable?limit=15");
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          render(await response.json());
+        } catch (error) {
+          statusEl.textContent = "Refresh failed";
+          headlinesEl.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+        } finally {
+          refreshButton.disabled = false;
+        }
+      }
+
+      refreshButton.addEventListener("click", loadTrendable);
+      loadTrendable();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/trendable.py": {
+      "maxDuration": 30
+    }
+  }
+}
