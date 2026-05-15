@@ -10,7 +10,7 @@ Then return the top 15 headlines with source names and links.
 
 Current sources:
 
-- https://dylrit.lovable.app
+- https://reddit-aggregator--dylanguu11.replit.app/
 - https://news-aggregator-nu-tan.vercel.app/
 - https://osint-aggregator--dylan2045.replit.app/
 - https://dnu-dylan-new-york-updates--dylan2045aad.replit.app/

@@ -24,7 +24,7 @@ from html.parser import HTMLParser
 
 
 SOURCES = [
-    "https://dylrit.lovable.app",
+    "https://reddit-aggregator--dylanguu11.replit.app/",
     "https://news-aggregator-nu-tan.vercel.app/",
     "https://osint-aggregator--dylan2045.replit.app/",
     "https://dnu-dylan-new-york-updates--dylan2045aad.replit.app/",
@@ -33,6 +33,7 @@ SOURCES = [
 ]
 
 JSON_ENDPOINTS = {
+    "https://reddit-aggregator--dylanguu11.replit.app/": ["api/news"],
     "https://news-aggregator-nu-tan.vercel.app/": ["data.json"],
     "https://osint-aggregator--dylan2045.replit.app/": ["api/osint/articles"],
     "https://dnu-dylan-new-york-updates--dylan2045aad.replit.app/": ["api/feeds"],
